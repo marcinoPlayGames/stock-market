@@ -11,20 +11,34 @@ import (
 )
 
 var (
-	ErrStockNotFound       = errors.New("stock not found in bank")
-	ErrInsufficientBank    = errors.New("insufficient stock in bank")
-	ErrInsufficientWallet  = errors.New("insufficient stock in wallet")
+	ErrStockNotFound      = errors.New("stock not found in bank")
+	ErrInsufficientBank   = errors.New("insufficient stock in bank")
+	ErrInsufficientWallet = errors.New("insufficient stock in wallet")
 )
 
 const (
-	bankKey   = "bank:stocks"
-	logKey    = "audit:log"
+	bankKey = "bank:stocks"
+	logKey  = "audit:log"
 )
 
 func walletKey(walletID string) string {
 	return fmt.Sprintf("wallet:%s:stocks", walletID)
 }
 
+// Repository is the interface that both the real Redis implementation
+// and test mocks satisfy.
+type Repository interface {
+	Buy(ctx context.Context, walletID, stockName string) error
+	Sell(ctx context.Context, walletID, stockName string) error
+	GetWallet(ctx context.Context, walletID string) ([]model.StockEntry, error)
+	GetWalletStock(ctx context.Context, walletID, stockName string) (int64, bool, error)
+	GetBankStocks(ctx context.Context) ([]model.StockEntry, error)
+	SetBankStocks(ctx context.Context, stocks []model.StockEntry) error
+	AppendLog(ctx context.Context, entry model.LogEntry) error
+	GetLog(ctx context.Context) ([]model.LogEntry, error)
+}
+
+// RedisRepository is the production implementation of Repository.
 type RedisRepository struct {
 	rdb *redis.Client
 }
@@ -33,10 +47,6 @@ func NewRedisRepository(rdb *redis.Client) *RedisRepository {
 	return &RedisRepository{rdb: rdb}
 }
 
-// buyScript atomically:
-// 1. Checks stock exists in bank
-// 2. Checks quantity > 0
-// 3. Decrements bank, increments wallet
 var buyScript = redis.NewScript(`
 local bankKey = KEYS[1]
 local walletKey = KEYS[2]
@@ -44,20 +54,16 @@ local stock = ARGV[1]
 
 local bankQty = tonumber(redis.call("HGET", bankKey, stock))
 if bankQty == nil then
-    return -1  -- stock not found
+    return -1
 end
 if bankQty <= 0 then
-    return -2  -- insufficient bank stock
+    return -2
 end
 redis.call("HINCRBY", bankKey, stock, -1)
 redis.call("HINCRBY", walletKey, stock, 1)
 return 1
 `)
 
-// sellScript atomically:
-// 1. Checks stock exists in bank (so it's a known stock)
-// 2. Checks wallet has the stock
-// 3. Increments bank, decrements wallet
 var sellScript = redis.NewScript(`
 local bankKey = KEYS[1]
 local walletKey = KEYS[2]
@@ -65,12 +71,12 @@ local stock = ARGV[1]
 
 local bankExists = redis.call("HEXISTS", bankKey, stock)
 if bankExists == 0 then
-    return -1  -- stock not found
+    return -1
 end
 
 local walletQty = tonumber(redis.call("HGET", walletKey, stock))
 if walletQty == nil or walletQty <= 0 then
-    return -3  -- insufficient wallet stock
+    return -3
 end
 
 redis.call("HINCRBY", bankKey, stock, 1)
@@ -121,7 +127,6 @@ func (r *RedisRepository) GetWallet(ctx context.Context, walletID string) ([]mod
 }
 
 func (r *RedisRepository) GetWalletStock(ctx context.Context, walletID, stockName string) (int64, bool, error) {
-	// Check stock exists in bank first
 	exists, err := r.rdb.HExists(ctx, bankKey, stockName).Result()
 	if err != nil {
 		return 0, false, err
