@@ -8,6 +8,7 @@ import (
 	"stock-market/internal/model"
 
 	"github.com/redis/go-redis/v9"
+	"strconv"
 )
 
 var (
@@ -121,7 +122,7 @@ func (r *RedisRepository) Sell(ctx context.Context, walletID, stockName string) 
 func (r *RedisRepository) GetWallet(ctx context.Context, walletID string) ([]model.StockEntry, error) {
 	data, err := r.rdb.HGetAll(ctx, walletKey(walletID)).Result()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get wallet failed: %w", err)
 	}
 	return parseStockMap(data), nil
 }
@@ -144,7 +145,7 @@ func (r *RedisRepository) GetWalletStock(ctx context.Context, walletID, stockNam
 func (r *RedisRepository) GetBankStocks(ctx context.Context) ([]model.StockEntry, error) {
 	data, err := r.rdb.HGetAll(ctx, bankKey).Result()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get bank stocks failed: %w", err)
 	}
 	return parseStockMap(data), nil
 }
@@ -157,9 +158,12 @@ func (r *RedisRepository) SetBankStocks(ctx context.Context, stocks []model.Stoc
 		for _, s := range stocks {
 			fields[s.Name] = s.Quantity
 		}
-		pipe.HMSet(ctx, bankKey, fields)
+		pipe.HSet(ctx, bankKey, fields)
 	}
 	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("set bank stocks failed: %w", err)
+	}
 	return err
 }
 
@@ -174,7 +178,7 @@ func (r *RedisRepository) AppendLog(ctx context.Context, entry model.LogEntry) e
 func (r *RedisRepository) GetLog(ctx context.Context) ([]model.LogEntry, error) {
 	items, err := r.rdb.LRange(ctx, logKey, 0, -1).Result()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get log failed: %w", err)
 	}
 	entries := make([]model.LogEntry, 0, len(items))
 	for _, item := range items {
@@ -189,8 +193,11 @@ func (r *RedisRepository) GetLog(ctx context.Context) ([]model.LogEntry, error) 
 func parseStockMap(data map[string]string) []model.StockEntry {
 	entries := make([]model.StockEntry, 0, len(data))
 	for name, qtyStr := range data {
-		var qty int64
-		fmt.Sscanf(qtyStr, "%d", &qty)
+		qty, err := strconv.ParseInt(qtyStr, 10, 64)
+		if err != nil {
+			// Opcjonalnie: log.Printf("Error parsing quantity for %s: %v", name, err)
+			continue // Skipping broken record
+		}
 		entries = append(entries, model.StockEntry{Name: name, Quantity: qty})
 	}
 	return entries

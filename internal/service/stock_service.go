@@ -5,6 +5,7 @@ import (
 	"errors"
 	"stock-market/internal/model"
 	"stock-market/internal/repository"
+	"log"
 )
 
 // StockService now depends on the Repository interface, not the concrete
@@ -47,11 +48,18 @@ func (s *StockService) Trade(ctx context.Context, walletID, stockName, tradeType
 		return &TradeError{Code: 500, Message: "internal error"}
 	}
 
-	_ = s.repo.AppendLog(ctx, model.LogEntry{
+	// Conscious login handling - login error does not reverse the transaction,
+	// but it is recorded in the system logs.
+	err = s.repo.AppendLog(ctx, model.LogEntry{
 		Type:      tradeType,
 		WalletID:  walletID,
 		StockName: stockName,
 	})
+	if err != nil {
+		// Using the standard log or slog (available since Go 1.21)
+		log.Printf("ERROR: failed to append log for %s trade: %v", tradeType, err)
+	}
+
 	return nil
 }
 

@@ -8,6 +8,9 @@ import (
 	"stock-market/internal/service"
 
 	"github.com/go-chi/chi/v5"
+	"log"
+	"fmt"
+	"time"
 )
 
 type Handler struct {
@@ -103,9 +106,18 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Chaos(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Chaos triggered on instance")
+
+	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusOK)
+
+	fmt.Fprintf(w, "killing instance...\n")
+
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
-	os.Exit(1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(1)
+	}()
 }
