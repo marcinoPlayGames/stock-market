@@ -7,11 +7,13 @@ import (
 	"stock-market/internal/repository"
 )
 
+// StockService now depends on the Repository interface, not the concrete
+// RedisRepository. This enables proper dependency injection and unit testing.
 type StockService struct {
-	repo *repository.RedisRepository
+	repo repository.Repository
 }
 
-func NewStockService(repo *repository.RedisRepository) *StockService {
+func NewStockService(repo repository.Repository) *StockService {
 	return &StockService{repo: repo}
 }
 
